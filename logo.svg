@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Sketch logo">
+  <!-- ink tile -->
+  <rect width="100" height="100" rx="24" fill="#0F172A"/>
+  <!-- freehand annotation stroke -->
+  <path d="M22 64 Q38 30 53 54 T80 46" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- pen-tip cursor (default draw color) -->
+  <circle cx="80" cy="46" r="10" fill="#EF4444" stroke="#FFFFFF" stroke-width="3"/>
+</svg>

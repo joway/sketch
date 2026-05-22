@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sketch</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0F172A;
+    --ink-soft: #475569;
+    --ink-faint: #94A3B8;
+    --bg: #FAFAF7;
+    --panel: rgba(255, 255, 255, 0.86);
+    --panel-border: rgba(15, 23, 42, 0.08);
+    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 12px 32px rgba(15,23,42,0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: 'Geist', system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- canvas surface ---------- */
+  .stage {
+    position: fixed;
+    inset: 0;
+    background: #FFFFFF;
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(15,23,42,0.05) 1px, transparent 0);
+    background-size: 28px 28px;
+  }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+  .stage.draw { cursor: none; }
+  .stage.text { cursor: text; }
+  .stage.erase { cursor: none; }
+
+  /* ---------- help panel ---------- */
+  .help {
+    position: fixed;
+    top: 22px;
+    left: 22px;
+    width: 320px;
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--panel-border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    padding: 18px 20px 20px;
+    z-index: 20;
+    animation: helpIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .help.closing { animation: helpOut 0.25s ease forwards; }
+  @keyframes helpIn {
+    from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes helpOut {
+    to { opacity: 0; transform: translateY(-4px) scale(0.985); }
+  }
+  .help-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .help-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .help-eyebrow::before {
+    content: "";
+    width: 6px; height: 6px;
+    background: #10B981;
+    border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(16,185,129,0.18);
+  }
+  .close {
+    width: 24px; height: 24px;
+    display: grid; place-items: center;
+    border-radius: 7px;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .close:hover { background: rgba(15,23,42,0.06); color: var(--ink); }
+  .help h1 {
+    font-size: 21px;
+    line-height: 1.25;
+    margin: 4px 0 16px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    color: var(--ink);
+    text-wrap: pretty;
+  }
+  .help ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .help li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+  }
+  .kbd {
+    display: inline-grid;
+    place-items: center;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 7px;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+    background: #FFFFFF;
+    border: 1px solid rgba(15,23,42,0.14);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .kbd-grp { display: inline-flex; gap: 4px; align-items: center; }
+  .help-foot {
+    margin-top: 16px;
+    padding-top: 13px;
+    border-top: 1px solid rgba(15,23,42,0.06);
+    font-size: 12px;
+    color: var(--ink-faint);
+    line-height: 1.5;
+  }
+
+  /* ---------- toolbar ---------- */
+  .toolbar {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 7px;
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+  }
+  .tb-section {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    border-radius: 14px;
+    transition: background 0.2s ease;
+  }
+  .tb-section.active { background: rgba(15,23,42,0.05); }
+  /* wrappers hold the size buttons; collapse them so the buttons
+     become direct flex items of the section and lay out horizontally */
+  #brushButtons, #fontButtons { display: contents; }
+  .tb-key {
+    display: inline-grid;
+    place-items: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    margin-right: 4px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    background: transparent;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+  }
+  .tb-section.active .tb-key {
+    background: var(--ink);
+    color: #fff;
+  }
+  .divider {
+    width: 1px;
+    height: 22px;
+    background: rgba(15,23,42,0.1);
+    margin: 0 3px;
+  }
+  .swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.14s, border-color 0.14s, box-shadow 0.14s;
+    position: relative;
+    padding: 0;
+    background-clip: padding-box;
+  }
+  .swatch:hover { transform: scale(1.1); }
+  .swatch.active {
+    border-color: rgba(15,23,42,0.85);
+    transform: scale(1.05);
+  }
+  .size-btn {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.14s;
+  }
+  .size-btn:hover { background: rgba(15,23,42,0.05); }
+  .size-btn.active { background: rgba(15,23,42,0.08); }
+  .size-dot {
+    border-radius: 50%;
+    background: var(--ink);
+    transition: background 0.15s;
+  }
+  .size-T {
+    font-family: 'Geist', sans-serif;
+    font-weight: 700;
+    color: var(--ink);
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .action-btn {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    border: none;
+    background: transparent;
+    color: var(--ink-soft);
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.14s, color 0.14s;
+  }
+  .action-btn:hover:not(:disabled) { background: rgba(15,23,42,0.06); color: var(--ink); }
+  .action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* ---------- custom cursor for draw ---------- */
+  .draw-cursor {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 50;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.85), 0 0 0 2px rgba(15,23,42,0.15);
+    transition: width 0.12s, height 0.12s, background 0.12s;
+  }
+
+  /* ---------- custom cursor for erase ---------- */
+  .erase-cursor {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 50;
+    border: 1.5px solid rgba(15,23,42,0.55);
+    background: rgba(15,23,42,0.05);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.85);
+  }
+
+  /* eraser glyph in the toolbar (indicator, not a control) */
+  .eraser-glyph {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    color: var(--ink-faint);
+    transition: color 0.2s ease;
+  }
+  .tb-section.active .eraser-glyph { color: var(--ink); }
+
+  /* ---------- mode badge near cursor ---------- */
+  .mode-badge {
+    position: fixed;
+    pointer-events: none;
+    background: var(--ink);
+    color: #fff;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    padding: 3px 7px;
+    border-radius: 5px;
+    z-index: 49;
+    transform: translate(14px, 14px);
+    opacity: 0.92;
+  }
+
+  /* ---------- text elements layer ---------- */
+  .text-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .text-pinned {
+    position: absolute;
+    line-height: 1.2;
+    font-family: 'Geist', sans-serif;
+    font-weight: 500;
+    white-space: pre;
+    transform: translateY(-100%);
+    letter-spacing: -0.005em;
+  }
+  /* labels become grabbable only when no tool is active (idle mode) */
+  .text-layer.draggable .text-pinned { pointer-events: auto; cursor: grab; }
+  .text-layer.draggable .text-pinned.dragging { cursor: grabbing; }
+  .text-input {
+    position: absolute;
+    background: transparent;
+    border: 1px dashed rgba(15,23,42,0.35);
+    border-radius: 4px;
+    outline: none;
+    padding: 1px 5px;
+    margin: 0;
+    font-family: 'Geist', sans-serif;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: pre;
+    min-width: 8px;
+    pointer-events: auto;
+    user-select: text;
+    transform: translateY(-100%);
+    letter-spacing: -0.005em;
+  }
+  .text-input:focus { border-color: rgba(15,23,42,0.55); }
+
+  /* ---------- toast hints ---------- */
+  .toast {
+    position: fixed;
+    left: 50%;
+    top: 24px;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: #fff;
+    font-family: 'Geist', sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 999px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 6px 20px rgba(15,23,42,0.18);
+    animation: toastIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translate(-50%, -8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  /* ---------- restore help hint when closed ---------- */
+  .help-hint {
+    position: fixed;
+    top: 22px;
+    left: 22px;
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    color: var(--ink-soft);
+    z-index: 20;
+    transition: color 0.15s, transform 0.15s;
+    animation: helpIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .help-hint:hover { color: var(--ink); transform: scale(1.04); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <!-- canvas surface -->
+  <div class="stage" id="stage">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- text layer over canvas -->
+  <div class="text-layer" id="textLayer"></div>
+
+  <!-- draw mode custom cursor -->
+  <div class="draw-cursor hidden" id="drawCursor"></div>
+
+  <!-- erase mode custom cursor -->
+  <div class="erase-cursor hidden" id="eraseCursor"></div>
+
+  <!-- mode badge near cursor -->
+  <div class="mode-badge hidden" id="modeBadge"></div>
+
+  <!-- help panel -->
+  <div class="help" id="help" role="dialog" aria-label="How to use Sketch">
+    <div class="help-head">
+      <span class="help-eyebrow">Sketch</span>
+      <button class="close" id="helpClose" title="Close" aria-label="Close help">
+        <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+          <path d="M2 2L9 9M9 2L2 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+    <ul>
+      <li>
+        <span class="kbd">D</span>
+        <span><strong style="color: var(--ink); font-weight: 600;">Hold</strong> and move the cursor &mdash; draw freely</span>
+      </li>
+      <li>
+        <span class="kbd">T</span>
+        <span>Toggle text mode, then click the canvas to place text</span>
+      </li>
+      <li>
+        <span class="kbd">E</span>
+        <span><strong style="color: var(--ink); font-weight: 600;">Hold</strong> and move the cursor &mdash; erase strokes &amp; text</span>
+      </li>
+      <li>
+        <span class="kbd-grp">
+          <span class="kbd">&#8984;</span>
+          <span class="kbd">Z</span>
+        </span>
+        <span>Undo the last action</span>
+      </li>
+      <li>
+        <span class="kbd">Esc</span>
+        <span>Exit text mode</span>
+      </li>
+    </ul>
+    <div class="help-foot">
+      Color, brush size and font size can be changed in the bottom toolbar. Drag a placed label to move it, or double-click it to edit.
+    </div>
+  </div>
+
+  <!-- help hint (shown when help is closed) -->
+  <button class="help-hint hidden" id="helpHint" title="Help" aria-label="Open help">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.4" />
+      <path d="M6 6.2c0-1.2 1-2 2-2s2 .7 2 1.8c0 1-.8 1.4-1.4 1.7-.5.3-.6.6-.6 1V9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      <circle cx="8" cy="11.2" r="0.85" fill="currentColor" />
+    </svg>
+  </button>
+
+  <!-- toolbar -->
+  <div class="toolbar" id="toolbar">
+    <!-- Pen section -->
+    <div class="tb-section" id="penSection">
+      <span class="tb-key">D</span>
+      <span id="brushButtons"></span>
+    </div>
+    <div class="divider"></div>
+    <!-- Colors -->
+    <div class="tb-section" id="colorButtons"></div>
+    <div class="divider"></div>
+    <!-- Text section -->
+    <div class="tb-section" id="textSection">
+      <span class="tb-key">T</span>
+      <span id="fontButtons"></span>
+    </div>
+    <div class="divider"></div>
+    <!-- Eraser (hold E) -->
+    <div class="tb-section" id="eraserSection" title="Eraser — hold E and move the cursor">
+      <span class="tb-key">E</span>
+      <span class="eraser-glyph" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M6.6 12.7H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <path d="M9.1 3.2 12.8 6.9a1.1 1.1 0 0 1 0 1.6l-4 4a1.1 1.1 0 0 1-1.6 0L3.4 8.7a1.1 1.1 0 0 1 0-1.6l4.1-4.1a1.1 1.1 0 0 1 1.6 0Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+          <path d="M5.6 6.8 9.3 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+      </span>
+    </div>
+    <div class="divider"></div>
+    <!-- Actions -->
+    <button class="action-btn" id="undoBtn" title="Undo (&#8984;Z)" aria-label="Undo" disabled>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M3.2 8.2C3.2 8.2 4.7 4.5 8.6 4.5C11.5 4.5 13.2 6.4 13.2 8.4C13.2 10.4 11.5 12.2 8.6 12.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <path d="M5.7 6L3.2 8.2L5.5 10.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+    <button class="action-btn" id="clearBtn" title="Clear" aria-label="Clear all" disabled>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M3 4.5H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <path d="M6 4.5V3.2C6 2.7 6.4 2.3 6.9 2.3H9.1C9.6 2.3 10 2.7 10 3.2V4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <path d="M4.3 4.5L4.9 12.7C4.9 13.3 5.4 13.7 6 13.7H10C10.6 13.7 11.1 13.3 11.1 12.7L11.7 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- design tokens ----------
+  const COLORS = [
+    "#0F172A", // ink
+    "#EF4444", // red
+    "#F97316", // orange
+    "#EAB308", // amber
+    "#10B981", // emerald
+    "#3B82F6", // blue
+    "#A855F7", // violet
+  ];
+  const BRUSH_SIZES = [2, 4, 8, 14];
+  const FONT_SIZES = [16, 22, 32, 48];
+  const FONT_VIS = [11, 14, 17, 21]; // visual T size in toolbar
+  const ERASER_RADIUS = 14; // hit radius for the eraser, in CSS px
+
+  // ---------- helpers ----------
+  const uid = () => Math.random().toString(36).slice(2, 9);
+
+  function drawStroke(ctx, points, color, size) {
+    if (!points || points.length === 0) return;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (points.length === 1) {
+      ctx.beginPath();
+      ctx.arc(points[0].x, points[0].y, Math.max(size / 2, 0.5), 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length - 1; i++) {
+      const cx = (points[i].x + points[i + 1].x) / 2;
+      const cy = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, cx, cy);
+    }
+    const last = points[points.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+  }
+
+  // ---------- state ----------
+  const state = {
+    color: COLORS[1],
+    brushSize: BRUSH_SIZES[1],
+    fontSize: FONT_SIZES[1],
+    strokes: [],
+    texts: [],
+    history: [], // stack of {strokes, texts} snapshots taken before each change
+    dHeld: false,
+    eHeld: false,
+    textMode: false,
+    pendingText: null, // {x, y, value, color, size, el}
+    cursorPos: { x: -100, y: -100 },
+    cursorVisible: false,
+  };
+
+  const drawing = { active: false, stroke: null };
+  let eraseSnapped = false; // one undo snapshot per E-hold erase session
+
+  const getMode = () =>
+    state.dHeld ? "draw" : state.eHeld ? "erase" : state.textMode ? "text" : "idle";
+
+  // ---------- DOM refs ----------
+  const stage = document.getElementById("stage");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const textLayer = document.getElementById("textLayer");
+  const drawCursor = document.getElementById("drawCursor");
+  const eraseCursor = document.getElementById("eraseCursor");
+  const modeBadge = document.getElementById("modeBadge");
+  const help = document.getElementById("help");
+  const helpHint = document.getElementById("helpHint");
+  const undoBtn = document.getElementById("undoBtn");
+  const clearBtn = document.getElementById("clearBtn");
+  const penSection = document.getElementById("penSection");
+  const textSection = document.getElementById("textSection");
+  const eraserSection = document.getElementById("eraserSection");
+
+  // ---------- canvas rendering ----------
+  function sizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function repaint() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    state.strokes.forEach((s) => drawStroke(ctx, s.points, s.color, s.size));
+    if (drawing.stroke) {
+      drawStroke(ctx, drawing.stroke.points, drawing.stroke.color, drawing.stroke.size);
+    }
+  }
+
+  function fullRepaint() {
+    sizeCanvas();
+    repaint();
+  }
+
+  // ---------- toolbar build ----------
+  function buildBrushButtons() {
+    const wrap = document.getElementById("brushButtons");
+    wrap.innerHTML = "";
+    BRUSH_SIZES.forEach((s) => {
+      const visual = Math.min(s + 3, 18);
+      const btn = document.createElement("button");
+      btn.className = "size-btn";
+      btn.title = s + "px";
+      btn.dataset.size = s;
+      const dot = document.createElement("span");
+      dot.className = "size-dot";
+      dot.style.width = visual + "px";
+      dot.style.height = visual + "px";
+      btn.appendChild(dot);
+      btn.addEventListener("click", () => setBrushSize(s));
+      wrap.appendChild(btn);
+    });
+  }
+
+  function buildColorButtons() {
+    const wrap = document.getElementById("colorButtons");
+    wrap.innerHTML = "";
+    COLORS.forEach((c) => {
+      const btn = document.createElement("button");
+      btn.className = "swatch";
+      btn.style.background = c;
+      btn.title = c;
+      btn.setAttribute("aria-label", "color " + c);
+      btn.dataset.color = c;
+      btn.addEventListener("click", () => setColor(c));
+      wrap.appendChild(btn);
+    });
+  }
+
+  function buildFontButtons() {
+    const wrap = document.getElementById("fontButtons");
+    wrap.innerHTML = "";
+    FONT_SIZES.forEach((s, i) => {
+      const btn = document.createElement("button");
+      btn.className = "size-btn";
+      btn.title = s + "px";
+      btn.dataset.size = s;
+      const t = document.createElement("span");
+      t.className = "size-T";
+      t.style.fontSize = FONT_VIS[i] + "px";
+      t.textContent = "T";
+      btn.appendChild(t);
+      btn.addEventListener("click", () => setFontSize(s));
+      wrap.appendChild(btn);
+    });
+  }
+
+  // ---------- toolbar sync ----------
+  function syncToolbar() {
+    const mode = getMode();
+    penSection.classList.toggle("active", mode === "draw");
+    textSection.classList.toggle("active", mode === "text");
+    eraserSection.classList.toggle("active", mode === "erase");
+
+    // brush buttons
+    document.querySelectorAll("#brushButtons .size-btn").forEach((btn) => {
+      const active = Number(btn.dataset.size) === state.brushSize;
+      btn.classList.toggle("active", active);
+      btn.querySelector(".size-dot").style.background = active ? state.color : "var(--ink)";
+    });
+    // color buttons
+    document.querySelectorAll("#colorButtons .swatch").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.color === state.color);
+    });
+    // font buttons
+    document.querySelectorAll("#fontButtons .size-btn").forEach((btn) => {
+      const active = Number(btn.dataset.size) === state.fontSize;
+      btn.classList.toggle("active", active);
+      btn.querySelector(".size-T").style.color = active ? state.color : "var(--ink)";
+    });
+
+    undoBtn.disabled = state.history.length === 0;
+    clearBtn.disabled = state.strokes.length + state.texts.length === 0;
+  }
+
+  function setColor(c) {
+    state.color = c;
+    if (state.pendingText) {
+      state.pendingText.color = c;
+      state.pendingText.el.style.color = c;
+    }
+    syncToolbar();
+    syncCursor();
+  }
+  function setBrushSize(s) {
+    state.brushSize = s;
+    syncToolbar();
+    syncCursor();
+  }
+  function setFontSize(s) {
+    state.fontSize = s;
+    if (state.pendingText) {
+      state.pendingText.size = s;
+      applyInputSize(state.pendingText);
+    }
+    syncToolbar();
+  }
+
+  // ---------- mode visuals (cursor + badge + stage class) ----------
+  function syncCursor() {
+    const mode = getMode();
+    stage.classList.toggle("draw", mode === "draw");
+    stage.classList.toggle("text", mode === "text");
+    stage.classList.toggle("erase", mode === "erase");
+    // placed labels are only grabbable when no tool is active
+    textLayer.classList.toggle("draggable", mode === "idle");
+
+    const showCursor = mode === "draw" && state.cursorVisible;
+    drawCursor.classList.toggle("hidden", !showCursor);
+    if (showCursor) {
+      const d = Math.max(state.brushSize, 6);
+      drawCursor.style.left = state.cursorPos.x + "px";
+      drawCursor.style.top = state.cursorPos.y + "px";
+      drawCursor.style.width = d + "px";
+      drawCursor.style.height = d + "px";
+      drawCursor.style.background = state.color;
+    }
+
+    const showErase = mode === "erase" && state.cursorVisible;
+    eraseCursor.classList.toggle("hidden", !showErase);
+    if (showErase) {
+      const d = ERASER_RADIUS * 2;
+      eraseCursor.style.left = state.cursorPos.x + "px";
+      eraseCursor.style.top = state.cursorPos.y + "px";
+      eraseCursor.style.width = d + "px";
+      eraseCursor.style.height = d + "px";
+    }
+
+    const showBadge =
+      (mode === "draw" || mode === "text" || mode === "erase") && state.cursorVisible;
+    modeBadge.classList.toggle("hidden", !showBadge);
+    if (showBadge) {
+      modeBadge.style.left = state.cursorPos.x + "px";
+      modeBadge.style.top = state.cursorPos.y + "px";
+      modeBadge.textContent =
+        mode === "draw" ? "DRAW" : mode === "text" ? "TEXT" : "ERASE";
+    }
+  }
+
+  // ---------- text rendering ----------
+  function renderTexts() {
+    // remove existing pinned spans (keep the input element)
+    textLayer.querySelectorAll(".text-pinned").forEach((n) => n.remove());
+    state.texts.forEach((t) => {
+      const span = document.createElement("span");
+      span.className = "text-pinned";
+      span.style.left = t.x + "px";
+      span.style.top = t.y + "px";
+      span.style.color = t.color;
+      span.style.fontSize = t.size + "px";
+      span.textContent = t.value;
+      span.addEventListener("mousedown", (e) => startTextDrag(e, t, span));
+      span.addEventListener("dblclick", (e) => editLabel(e, t));
+      textLayer.appendChild(span);
+      t._el = span; // kept for eraser hit-testing (via getBoundingClientRect)
+    });
+  }
+
+  // ---------- drag a placed label (idle mode only) ----------
+  function startTextDrag(e, t, span) {
+    if (getMode() !== "idle") return; // pointer-events also gate this
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const origX = t.x, origY = t.y;
+    let moved = false;
+    span.classList.add("dragging");
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+      span.style.left = origX + dx + "px";
+      span.style.top = origY + dy + "px";
+    };
+    const onUp = (ev) => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      span.classList.remove("dragging");
+      if (!moved) return;
+      // snapshot, then replace the label with a new object at the new
+      // position (replacing — not mutating — keeps undo snapshots intact)
+      snapshot();
+      const idx = state.texts.indexOf(t);
+      if (idx !== -1) {
+        state.texts[idx] = {
+          ...t,
+          x: origX + (ev.clientX - startX),
+          y: origY + (ev.clientY - startY),
+        };
+      }
+      renderTexts();
+      syncToolbar();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  function applyInputSize(p) {
+    const el = p.el;
+    el.style.fontSize = p.size + "px";
+    el.style.minWidth = Math.max(p.size * 0.6, 10) + "px";
+    const w = Math.max(
+      (p.value || "").length * p.size * 0.55 + p.size,
+      p.size * 1.2
+    );
+    el.style.width = w + "px";
+  }
+
+  // Open the inline text input. Pass an existing label as `editing` to
+  // re-edit it in place; otherwise a new label is created at (x, y).
+  function openTextInput(x, y, editing) {
+    if (state.pendingText) commitText();
+    const input = document.createElement("input");
+    input.className = "text-input";
+    input.style.left = x + "px";
+    input.style.top = y + "px";
+    const color = editing ? editing.color : state.color;
+    const size = editing ? editing.size : state.fontSize;
+    const value = editing ? editing.value : "";
+    input.style.color = color;
+    input.value = value;
+    const p = { x, y, value, color, size, el: input, editing: editing || null };
+    state.pendingText = p;
+    applyInputSize(p);
+    if (editing && editing._el) editing._el.style.visibility = "hidden";
+
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
+    input.addEventListener("input", () => {
+      p.value = input.value;
+      applyInputSize(p);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        commitText();
+        e.preventDefault();
+      } else if (e.key === "Escape") {
+        cancelText();
+        e.preventDefault();
+      }
+      e.stopPropagation();
+    });
+    input.addEventListener("blur", commitText);
+
+    textLayer.appendChild(input);
+    input.focus();
+    if (editing) input.select();
+  }
+
+  // Re-edit an existing label on double-click (idle mode only).
+  function editLabel(e, t) {
+    if (getMode() !== "idle") return;
+    e.preventDefault();
+    e.stopPropagation();
+    openTextInput(t.x, t.y, t);
+  }
+
+  function commitText() {
+    const p = state.pendingText;
+    if (!p) return;
+    state.pendingText = null;
+    const v = p.value;
+    p.el.remove();
+    const hasText = v && v.trim().length > 0;
+
+    if (p.editing) {
+      // re-editing an existing label
+      const idx = state.texts.indexOf(p.editing);
+      const empty = !hasText;
+      const changed =
+        empty ||
+        v !== p.editing.value ||
+        p.color !== p.editing.color ||
+        p.size !== p.editing.size;
+      if (changed) {
+        snapshot();
+        if (empty) {
+          if (idx !== -1) state.texts.splice(idx, 1); // emptied -> delete
+        } else if (idx !== -1) {
+          state.texts[idx] = { ...p.editing, value: v, color: p.color, size: p.size };
+        }
+      }
+      renderTexts(); // also restores the hidden original's visibility
+      syncToolbar();
+      return;
+    }
+
+    if (hasText) {
+      snapshot();
+      state.texts.push({ id: uid(), x: p.x, y: p.y, value: v, color: p.color, size: p.size });
+      renderTexts();
+      syncToolbar();
+    }
+  }
+
+  function cancelText() {
+    const p = state.pendingText;
+    if (!p) return;
+    state.pendingText = null;
+    p.el.remove();
+    if (p.editing && p.editing._el) p.editing._el.style.visibility = ""; // un-hide original
+  }
+
+  // ---------- undo / clear (snapshot-based) ----------
+  // Snapshot the current content before any mutating action so undo can
+  // restore it exactly — correct for draw, text, erase and clear alike.
+  function snapshot() {
+    state.history.push({ strokes: state.strokes.slice(), texts: state.texts.slice() });
+    if (state.history.length > 200) state.history.shift();
+  }
+
+  function undo() {
+    if (state.history.length === 0) return;
+    const prev = state.history.pop();
+    state.strokes = prev.strokes.slice();
+    state.texts = prev.texts.slice();
+    repaint();
+    renderTexts();
+    syncToolbar();
+  }
+
+  function clearAll() {
+    if (state.strokes.length + state.texts.length === 0) return;
+    snapshot(); // clear is undoable
+    state.strokes = [];
+    state.texts = [];
+    cancelText();
+    repaint();
+    renderTexts();
+    syncToolbar();
+  }
+
+  // ---------- stroke begin / finalize ----------
+  // A stroke is gated by holding D (trackpad-friendly: no mouse button
+  // needed). It begins empty on D-down and the first cursor move seeds
+  // its starting point, so a D-tap without movement draws nothing.
+  function beginStroke() {
+    drawing.active = true;
+    drawing.stroke = { points: [], color: state.color, size: state.brushSize };
+  }
+
+  function finalizeStroke() {
+    if (!drawing.active || !drawing.stroke) return;
+    const s = drawing.stroke;
+    if (s.points.length > 0) {
+      snapshot();
+      state.strokes.push(s);
+    }
+    drawing.stroke = null;
+    drawing.active = false;
+    syncToolbar();
+  }
+
+  // ---------- eraser (object-level, gated by holding E) ----------
+  function distToSegment(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const l2 = dx * dx + dy * dy;
+    if (l2 === 0) return Math.hypot(px - ax, py - ay);
+    let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  function strokeHit(s, x, y) {
+    const r = ERASER_RADIUS + s.size / 2;
+    const pts = s.points;
+    if (pts.length === 1) return Math.hypot(x - pts[0].x, y - pts[0].y) <= r;
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (distToSegment(x, y, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y) <= r) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function textHit(t, x, y) {
+    if (!t._el) return false;
+    const r = t._el.getBoundingClientRect();
+    const pad = ERASER_RADIUS * 0.5;
+    return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  }
+
+  function eraseAt(x, y) {
+    const hitStrokes = state.strokes.filter((s) => strokeHit(s, x, y));
+    const hitTexts = state.texts.filter((t) => textHit(t, x, y));
+    if (hitStrokes.length === 0 && hitTexts.length === 0) return;
+    if (!eraseSnapped) { snapshot(); eraseSnapped = true; } // one undo per E-hold
+    if (hitStrokes.length) {
+      state.strokes = state.strokes.filter((s) => !hitStrokes.includes(s));
+      repaint();
+    }
+    if (hitTexts.length) {
+      state.texts = state.texts.filter((t) => !hitTexts.includes(t));
+      renderTexts();
+    }
+    syncToolbar();
+  }
+
+  // ---------- pointer handlers ----------
+  stage.addEventListener("mousedown", (e) => {
+    if (getMode() === "text") {
+      // prevent the stage from stealing focus, otherwise the freshly
+      // created input blurs immediately and the empty field is removed
+      e.preventDefault();
+      openTextInput(e.clientX, e.clientY);
+    }
+    // draw mode needs no mouse button — strokes are driven by holding D
+  });
+
+  stage.addEventListener("mousemove", (e) => {
+    state.cursorPos = { x: e.clientX, y: e.clientY };
+    if (!state.cursorVisible) state.cursorVisible = true;
+    const mode = getMode();
+    if (mode === "draw" && drawing.active && drawing.stroke) {
+      drawing.stroke.points.push({ x: e.clientX, y: e.clientY });
+      repaint();
+    } else if (mode === "erase") {
+      eraseAt(e.clientX, e.clientY);
+    }
+    syncCursor();
+  });
+
+  // ---------- toast ----------
+  let toastEl = null;
+  let toastTimer = null;
+  function flashToast(msg) {
+    if (toastEl) toastEl.remove();
+    toastEl = document.createElement("div");
+    toastEl.className = "toast";
+    toastEl.textContent = msg;
+    document.body.appendChild(toastEl);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      if (toastEl) { toastEl.remove(); toastEl = null; }
+    }, 1400);
+  }
+
+  // ---------- keyboard ----------
+  function isTyping(e) {
+    const t = e.target;
+    return (
+      t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+    );
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if (isTyping(e)) return; // text input handles its own keys
+
+    if (e.key === "d" || e.key === "D") {
+      if (!e.repeat) {
+        state.dHeld = true;
+        if (state.textMode) {
+          state.textMode = false;
+          cancelText();
+        }
+        beginStroke();
+        syncCursor();
+        syncToolbar();
+      }
+      e.preventDefault();
+    } else if (e.key === "e" || e.key === "E") {
+      if (!e.repeat) {
+        state.eHeld = true;
+        eraseSnapped = false;
+        if (state.textMode) {
+          state.textMode = false;
+          cancelText();
+        }
+        syncCursor();
+        syncToolbar();
+      }
+      e.preventDefault();
+    } else if (e.key === "t" || e.key === "T") {
+      if (!e.repeat) {
+        state.textMode = !state.textMode;
+        if (!state.textMode) cancelText();
+        else flashToast("Text mode — click the canvas to place text");
+        syncCursor();
+        syncToolbar();
+      }
+      e.preventDefault();
+    } else if (e.key === "Escape") {
+      state.textMode = false;
+      cancelText();
+      syncCursor();
+      syncToolbar();
+    } else if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z")) {
+      undo();
+      e.preventDefault();
+    } else if (e.key === "?" && e.shiftKey) {
+      toggleHelp();
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "d" || e.key === "D") {
+      state.dHeld = false;
+      if (drawing.active && drawing.stroke) finalizeStroke();
+      syncCursor();
+      syncToolbar();
+    } else if (e.key === "e" || e.key === "E") {
+      state.eHeld = false;
+      eraseSnapped = false;
+      syncCursor();
+      syncToolbar();
+    }
+  });
+
+  // ---------- help panel ----------
+  function closeHelp() {
+    help.classList.add("closing");
+    setTimeout(() => {
+      help.classList.add("hidden");
+      help.classList.remove("closing");
+      helpHint.classList.remove("hidden");
+    }, 230);
+  }
+  function openHelp() {
+    help.classList.remove("hidden");
+    helpHint.classList.add("hidden");
+  }
+  function toggleHelp() {
+    if (help.classList.contains("hidden")) openHelp();
+    else closeHelp();
+  }
+  document.getElementById("helpClose").addEventListener("click", closeHelp);
+  helpHint.addEventListener("click", openHelp);
+  // keep UI clicks from triggering stage handlers
+  document.getElementById("toolbar").addEventListener("mousedown", (e) => e.stopPropagation());
+  undoBtn.addEventListener("click", undo);
+  clearBtn.addEventListener("click", clearAll);
+  help.addEventListener("mousedown", (e) => e.stopPropagation());
+  helpHint.addEventListener("mousedown", (e) => e.stopPropagation());
+
+  // ---------- resize ----------
+  window.addEventListener("resize", fullRepaint);
+
+  // ---------- init ----------
+  buildBrushButtons();
+  buildColorButtons();
+  buildFontButtons();
+  fullRepaint();
+  syncToolbar();
+  syncCursor();
+})();
+</script>
+</body>
+</html>
