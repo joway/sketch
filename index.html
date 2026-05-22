@@ -44,6 +44,8 @@
   .stage.draw { cursor: none; }
   .stage.text { cursor: text; }
   .stage.erase { cursor: none; }
+  .stage.pan { cursor: grab; }
+  .stage.pan.grabbing { cursor: grabbing; }
 
   /* ---------- help panel ---------- */
   .help {
@@ -459,6 +461,10 @@
         <span class="kbd">Esc</span>
         <span>Exit text mode</span>
       </li>
+      <li>
+        <span class="kbd">Space</span>
+        <span>Hold and drag to pan &mdash; scroll to pan, pinch to zoom</span>
+      </li>
     </ul>
     <div class="help-foot">
       Color, brush size and font size can be changed in the bottom toolbar. Drag a placed label to move it, or double-click it to edit.
@@ -504,6 +510,13 @@
     </div>
     <div class="divider"></div>
     <!-- Actions -->
+    <button class="action-btn" id="resetViewBtn" title="Reset view (zoom & pan)" aria-label="Reset view">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.4" />
+        <circle cx="8" cy="8" r="1.9" fill="currentColor" />
+        <path d="M8 1.4V3.2M8 12.8V14.6M1.4 8H3.2M12.8 8H14.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </svg>
+    </button>
     <button class="action-btn" id="undoBtn" title="Undo (&#8984;Z)" aria-label="Undo" disabled>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <path d="M3.2 8.2C3.2 8.2 4.7 4.5 8.6 4.5C11.5 4.5 13.2 6.4 13.2 8.4C13.2 10.4 11.5 12.2 8.6 12.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
@@ -578,17 +591,28 @@
     history: [], // stack of {strokes, texts} snapshots taken before each change
     dHeld: false,
     eHeld: false,
+    spaceHeld: false,
     textMode: false,
     pendingText: null, // {x, y, value, color, size, el}
     cursorPos: { x: -100, y: -100 },
     cursorVisible: false,
   };
 
+  // infinite-canvas view transform: screen = world * scale + {x, y}
+  const view = { x: 0, y: 0, scale: 1 };
+  const MIN_SCALE = 0.2, MAX_SCALE = 8;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const toWorld = (sx, sy) => ({ x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale });
+
   const drawing = { active: false, stroke: null };
   let eraseSnapped = false; // one undo snapshot per E-hold erase session
 
   const getMode = () =>
-    state.dHeld ? "draw" : state.eHeld ? "erase" : state.textMode ? "text" : "idle";
+    state.spaceHeld ? "pan"
+      : state.dHeld ? "draw"
+      : state.eHeld ? "erase"
+      : state.textMode ? "text"
+      : "idle";
 
   // ---------- DOM refs ----------
   const stage = document.getElementById("stage");
@@ -621,18 +645,47 @@
   }
 
   function repaint() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    ctx.clearRect(0, 0, w, h);
+    const dpr = window.devicePixelRatio || 1;
+    // clear in device space, then draw in world space (pan + zoom baked in)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, view.x * dpr, view.y * dpr);
     state.strokes.forEach((s) => drawStroke(ctx, s.points, s.color, s.size));
     if (drawing.stroke) {
       drawStroke(ctx, drawing.stroke.points, drawing.stroke.color, drawing.stroke.size);
     }
   }
 
+  // apply a changed view to everything that depends on it
+  function applyView() {
+    repaint();
+    textLayer.style.transformOrigin = "0 0";
+    textLayer.style.transform =
+      "translate(" + view.x + "px, " + view.y + "px) scale(" + view.scale + ")";
+    stage.style.backgroundPosition = view.x + "px " + view.y + "px";
+    stage.style.backgroundSize = 28 * view.scale + "px " + 28 * view.scale + "px";
+    syncCursor();
+  }
+
+  function zoomAt(sx, sy, factor) {
+    const ns = clamp(view.scale * factor, MIN_SCALE, MAX_SCALE);
+    const k = ns / view.scale;
+    view.x = sx - (sx - view.x) * k; // keep the world point under the cursor fixed
+    view.y = sy - (sy - view.y) * k;
+    view.scale = ns;
+    applyView();
+  }
+
+  function resetView() {
+    view.x = 0;
+    view.y = 0;
+    view.scale = 1;
+    applyView();
+  }
+
   function fullRepaint() {
     sizeCanvas();
-    repaint();
+    applyView();
   }
 
   // ---------- toolbar build ----------
@@ -745,13 +798,14 @@
     stage.classList.toggle("draw", mode === "draw");
     stage.classList.toggle("text", mode === "text");
     stage.classList.toggle("erase", mode === "erase");
+    stage.classList.toggle("pan", mode === "pan");
     // placed labels are only grabbable when no tool is active
     textLayer.classList.toggle("draggable", mode === "idle");
 
     const showCursor = mode === "draw" && state.cursorVisible;
     drawCursor.classList.toggle("hidden", !showCursor);
     if (showCursor) {
-      const d = Math.max(state.brushSize, 6);
+      const d = Math.max(state.brushSize * view.scale, 6);
       drawCursor.style.left = state.cursorPos.x + "px";
       drawCursor.style.top = state.cursorPos.y + "px";
       drawCursor.style.width = d + "px";
@@ -810,9 +864,10 @@
     span.classList.add("dragging");
 
     const onMove = (ev) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+      // screen delta -> world delta (positions are world coordinates)
+      const dx = (ev.clientX - startX) / view.scale;
+      const dy = (ev.clientY - startY) / view.scale;
+      if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 2) moved = true;
       span.style.left = origX + dx + "px";
       span.style.top = origY + dy + "px";
     };
@@ -828,8 +883,8 @@
       if (idx !== -1) {
         state.texts[idx] = {
           ...t,
-          x: origX + (ev.clientX - startX),
-          y: origY + (ev.clientY - startY),
+          x: origX + (ev.clientX - startX) / view.scale,
+          y: origY + (ev.clientY - startY) / view.scale,
         };
       }
       renderTexts();
@@ -1005,7 +1060,8 @@
   }
 
   function strokeHit(s, x, y) {
-    const r = ERASER_RADIUS + s.size / 2;
+    // x, y and the threshold are in world units (eraser radius is screen px)
+    const r = ERASER_RADIUS / view.scale + s.size / 2;
     const pts = s.points;
     if (pts.length === 1) return Math.hypot(x - pts[0].x, y - pts[0].y) <= r;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -1023,9 +1079,11 @@
     return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
   }
 
-  function eraseAt(x, y) {
-    const hitStrokes = state.strokes.filter((s) => strokeHit(s, x, y));
-    const hitTexts = state.texts.filter((t) => textHit(t, x, y));
+  function eraseAt(sx, sy) {
+    const w = toWorld(sx, sy);
+    // strokes are tested in world space; text uses its on-screen rect
+    const hitStrokes = state.strokes.filter((s) => strokeHit(s, w.x, w.y));
+    const hitTexts = state.texts.filter((t) => textHit(t, sx, sy));
     if (hitStrokes.length === 0 && hitTexts.length === 0) return;
     if (!eraseSnapped) { snapshot(); eraseSnapped = true; } // one undo per E-hold
     if (hitStrokes.length) {
@@ -1039,13 +1097,36 @@
     syncToolbar();
   }
 
+  // ---------- pan (Space + drag, or two-finger scroll via wheel) ----------
+  function startPan(e) {
+    const sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
+    stage.classList.add("grabbing");
+    const onMove = (ev) => {
+      view.x = ox + (ev.clientX - sx);
+      view.y = oy + (ev.clientY - sy);
+      applyView();
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      stage.classList.remove("grabbing");
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
   // ---------- pointer handlers ----------
   stage.addEventListener("mousedown", (e) => {
-    if (getMode() === "text") {
+    const mode = getMode();
+    if (mode === "pan") {
+      e.preventDefault();
+      startPan(e);
+    } else if (mode === "text") {
       // prevent the stage from stealing focus, otherwise the freshly
       // created input blurs immediately and the empty field is removed
       e.preventDefault();
-      openTextInput(e.clientX, e.clientY);
+      const w = toWorld(e.clientX, e.clientY);
+      openTextInput(w.x, w.y);
     }
     // draw mode needs no mouse button — strokes are driven by holding D
   });
@@ -1055,13 +1136,30 @@
     if (!state.cursorVisible) state.cursorVisible = true;
     const mode = getMode();
     if (mode === "draw" && drawing.active && drawing.stroke) {
-      drawing.stroke.points.push({ x: e.clientX, y: e.clientY });
+      const w = toWorld(e.clientX, e.clientY);
+      drawing.stroke.points.push(w);
       repaint();
     } else if (mode === "erase") {
       eraseAt(e.clientX, e.clientY);
     }
     syncCursor();
   });
+
+  // wheel: two-finger scroll pans, ctrl/⌘+scroll (pinch) zooms toward cursor
+  stage.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+      } else {
+        view.x -= e.deltaX;
+        view.y -= e.deltaY;
+        applyView();
+      }
+    },
+    { passive: false }
+  );
 
   // ---------- toast ----------
   let toastEl = null;
@@ -1130,6 +1228,12 @@
     } else if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z")) {
       undo();
       e.preventDefault();
+    } else if (e.key === " ") {
+      if (!state.spaceHeld) {
+        state.spaceHeld = true;
+        syncCursor();
+      }
+      e.preventDefault(); // hold Space to pan; don't scroll the page
     } else if (e.key === "?" && e.shiftKey) {
       toggleHelp();
     }
@@ -1146,6 +1250,9 @@
       eraseSnapped = false;
       syncCursor();
       syncToolbar();
+    } else if (e.key === " ") {
+      state.spaceHeld = false;
+      syncCursor();
     }
   });
 
@@ -1172,6 +1279,7 @@
   document.getElementById("toolbar").addEventListener("mousedown", (e) => e.stopPropagation());
   undoBtn.addEventListener("click", undo);
   clearBtn.addEventListener("click", clearAll);
+  document.getElementById("resetViewBtn").addEventListener("click", resetView);
   help.addEventListener("mousedown", (e) => e.stopPropagation());
   helpHint.addEventListener("mousedown", (e) => e.stopPropagation());
 
